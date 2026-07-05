@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Waybar Configurator
+GenericName=Status Bar Configurator
+Comment=Create and configure Waybar bars, modules and styling
+Exec=waybar-configurator
+Icon=preferences-desktop-display
+Terminal=false
+Categories=Settings;Utility;GTK;
+Keywords=waybar;statusbar;wayland;sway;bar;
+StartupNotify=true
