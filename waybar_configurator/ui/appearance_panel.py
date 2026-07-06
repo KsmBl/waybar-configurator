@@ -71,18 +71,78 @@ class AppearancePanel(Gtk.Box):
         box.pack_start(self._color_row("Tooltip text", "tooltip_foreground"), False, False, 0)
         self.pack_start(frame, False, False, 0)
 
-        # ── Shape & spacing ───────────────────────────────────────────────────
-        frame, box = widgets.section_frame("Shape & spacing")
-        for label, attr, lo, hi in [
-            ("Module corner radius (px)", "corner_radius", 0, 40),
-            ("Group corner radius (px)", "group_radius", 0, 40),
-            ("Vertical padding (px)", "padding_v", 0, 40),
-            ("Horizontal padding (px)", "padding_h", 0, 60),
-            ("Module margin (px)", "module_margin", 0, 30),
+        # ── Bar container ─────────────────────────────────────────────────────
+        frame, box = widgets.section_frame("Bar container")
+        style = Gtk.ComboBoxText()
+        style.append("groups", "Separate groups (pills)")
+        style.append("single", "Single bar")
+        style.set_active_id(self.theme.bar_style if self.theme.bar_style in ("groups", "single") else "groups")
+        style.connect("changed", lambda w: (setattr(self.theme, "bar_style", w.get_active_id() or "groups"),
+                                            self._changed()))
+        box.pack_start(widgets.labelled_row(
+            "Bar style", style,
+            "Separate groups: left / center / right are each their own rounded pill. "
+            "Single bar: one continuous background across the whole bar."), False, False, 0)
+
+        for label, attr, lo, hi, tip in [
+            ("Bar corner radius (px)", "bar_radius", 0, 40,
+             "Rounding of the whole bar. Used with the Single bar style."),
+            ("Bar padding — vertical (px)", "bar_padding_v", 0, 40,
+             "Inset the content from the bar's top/bottom edge. Different from Margins, "
+             "which are the gap outside the bar."),
+            ("Bar padding — horizontal (px)", "bar_padding_h", 0, 60,
+             "Inset the content from the bar's left/right edge."),
         ]:
             spin = self._spin(getattr(self.theme, attr), lo, hi)
-            spin.connect("value-changed", lambda w, a=attr: (setattr(self.theme, a, int(w.get_value())), self._changed()))
+            spin.connect("value-changed", lambda w, a=attr: (setattr(self.theme, a, int(w.get_value())),
+                                                             self._changed()))
+            box.pack_start(widgets.labelled_row(label, spin, tip), False, False, 0)
+        self.pack_start(frame, False, False, 0)
+
+        # ── Shape & spacing ───────────────────────────────────────────────────
+        frame, box = widgets.section_frame("Shape & spacing")
+
+        # Density preset — a one-click way to make the bar thinner or roomier.
+        # It drives the three vertical-spacing spinners below.
+        self._spins = {}
+        self._density = Gtk.ComboBoxText()
+        for name in ["Compact", "Comfortable", "Spacious"]:
+            self._density.append(name, name)
+        self._density.append("custom", "Custom")
+        self._density.set_active_id(self.theme.density_name() or "custom")
+        self._density.connect("changed", self._on_density_changed)
+        box.pack_start(widgets.labelled_row(
+            "Density", self._density,
+            "Overall bar thickness. Sets vertical padding and margins; "
+            "pick Compact for a thin bar."), False, False, 0)
+
+        for label, attr, lo, hi in [
+            ("Vertical padding (px)", "padding_v", 0, 40),
+            ("Module vertical margin (px)", "module_margin_v", 0, 30),
+            ("Group vertical margin (px)", "group_margin_v", 0, 30),
+            ("Horizontal padding (px)", "padding_h", 0, 60),
+            ("Module margin (px)", "module_margin", 0, 30),
+            ("Group edge spacing (px)", "group_margin_h", 0, 80),
+            ("Group horizontal padding (px)", "group_padding_h", 0, 40),
+            ("Module corner radius (px)", "corner_radius", 0, 40),
+            ("Group corner radius (px)", "group_radius", 0, 40),
+        ]:
+            spin = self._spin(getattr(self.theme, attr), lo, hi)
+            spin.connect("value-changed", lambda w, a=attr: self._on_spin(a, int(w.get_value())))
+            self._spins[attr] = spin
             box.pack_start(widgets.labelled_row(label, spin), False, False, 0)
+        self.pack_start(frame, False, False, 0)
+
+        # ── Workspaces ────────────────────────────────────────────────────────
+        frame, box = widgets.section_frame("Workspaces")
+        ws_width = self._spin(self.theme.workspace_min_width, 0, 200)
+        ws_width.connect("value-changed",
+                         lambda w: (setattr(self.theme, "workspace_min_width", int(w.get_value())),
+                                    self._changed()))
+        box.pack_start(widgets.labelled_row(
+            "Button width (px)", ws_width,
+            "Minimum width of each workspace button. 0 = fit the label. "
+            "Set a fixed value for evenly-sized, square-ish buttons."), False, False, 0)
         self.pack_start(frame, False, False, 0)
 
         # ── Per-module colours ────────────────────────────────────────────────
@@ -96,6 +156,30 @@ class AppearancePanel(Gtk.Box):
         for base_type in used:
             box.pack_start(self._module_color_row(base_type), False, False, 0)
         self.pack_start(frame, False, False, 0)
+
+    # Vertical-spacing attributes a density preset controls.
+    _DENSITY_ATTRS = ("padding_v", "module_margin_v", "group_margin_v")
+
+    def _on_spin(self, attr, value):
+        setattr(self.theme, attr, value)
+        # A manual tweak to a density-controlled value flips the preset to Custom.
+        if attr in self._DENSITY_ATTRS and self.theme.density_name() is None:
+            self._density.handler_block_by_func(self._on_density_changed)
+            self._density.set_active_id("custom")
+            self._density.handler_unblock_by_func(self._on_density_changed)
+        self._changed()
+
+    def _on_density_changed(self, combo):
+        name = combo.get_active_id()
+        if name == "custom":
+            return
+        # Set the model first, then mirror it into the spinners. Because all
+        # density-controlled values now match the preset, the spinners' own
+        # handlers won't flip the combo back to Custom.
+        self.theme.apply_density(name)
+        for attr in self._DENSITY_ATTRS:
+            self._spins[attr].set_value(getattr(self.theme, attr))
+        self._changed()
 
     def _module_color_row(self, base_type):
         md = get_module_def(base_type)

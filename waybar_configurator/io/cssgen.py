@@ -49,6 +49,41 @@ def generate_css(theme: Theme, used_types) -> str:
 
     group_border = rgba(theme.accent, 0.22)
     group_bg = rgba(theme.background, theme.background_opacity)
+    single = theme.bar_style == "single"
+
+    # window#waybar: transparent in "groups" mode (pills carry the background); a
+    # single continuous bar carries the background/radius itself.
+    window_lines = ["window#waybar {"]
+    if single:
+        window_lines.append(f"  background-color: {group_bg};")
+        if theme.bar_radius > 0:
+            window_lines.append(f"  border-radius: {theme.bar_radius}px;")
+    else:
+        window_lines.append("  background: transparent;")
+    if theme.bar_padding_v or theme.bar_padding_h:
+        window_lines.append(f"  padding: {theme.bar_padding_v}px {theme.bar_padding_h}px;")
+    window_lines.append(f"  color: {theme.foreground};")
+    window_lines.append("}")
+
+    # Module groups: rounded pills in "groups" mode, invisible pass-through in "single".
+    group_lines = [
+        ".modules-left,",
+        ".modules-center,",
+        ".modules-right {",
+    ]
+    if single:
+        group_lines.append("  background-color: transparent;")
+    else:
+        group_lines += [
+            f"  background-color: {group_bg};",
+            f"  border-radius: {theme.group_radius}px;",
+            f"  border: 1px solid {group_border};",
+        ]
+    group_lines += [
+        f"  margin: {theme.group_margin_v}px {theme.group_margin_h}px;",
+        f"  padding: 0 {theme.group_padding_h}px;",
+        "}",
+    ]
 
     lines = [
         "/* ============================================================",
@@ -65,26 +100,15 @@ def generate_css(theme: Theme, used_types) -> str:
         "  transition: background-color 0.2s ease, color 0.2s ease;",
         "}",
         "",
-        "window#waybar {",
-        "  background: transparent;",
-        f"  color: {theme.foreground};",
-        "}",
+        *window_lines,
         "",
         "/* Module group containers */",
-        ".modules-left,",
-        ".modules-center,",
-        ".modules-right {",
-        f"  background-color: {group_bg};",
-        f"  border-radius: {theme.group_radius}px;",
-        f"  border: 1px solid {group_border};",
-        "  margin: 4px 0;",
-        "  padding: 0 6px;",
-        "}",
+        *group_lines,
         "",
         "/* Shared module base */",
         f"{id_selector} {{",
         f"  padding: {theme.padding_v}px {theme.padding_h}px;",
-        f"  margin: 3px {theme.module_margin}px;",
+        f"  margin: {theme.module_margin_v}px {theme.module_margin}px;",
         f"  border-radius: {theme.corner_radius}px;",
         f"  color: {theme.foreground};",
         "  background-color: transparent;",
@@ -97,10 +121,14 @@ def generate_css(theme: Theme, used_types) -> str:
         "/* Workspace buttons */",
         "#workspaces button {",
         f"  padding: {theme.padding_v}px {theme.padding_h - 3}px;",
-        f"  margin: 3px {theme.module_margin}px;",
+        f"  margin: {theme.module_margin_v}px {theme.module_margin}px;",
         f"  border-radius: {theme.corner_radius}px;",
         f"  color: {theme.foreground};",
         "  background-color: transparent;",
+    ]
+    if theme.workspace_min_width > 0:
+        lines.append(f"  min-width: {theme.workspace_min_width}px;")
+    lines += [
         "}",
         "#workspaces button.focused,",
         "#workspaces button.active {",
