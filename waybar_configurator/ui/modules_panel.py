@@ -23,42 +23,62 @@ class ColumnView(Gtk.Box):
         self.placement = placement
         self.panel = panel
 
-        header = Gtk.Label(xalign=0.0)
-        header.set_markup(f"<b>{PLACEMENT_LABELS[placement]}</b>")
-        self.pack_start(header, False, False, 0)
+        self.header = Gtk.Label(xalign=0.0)
+        self.pack_start(self.header, False, False, 0)
 
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.listbox.connect("row-selected", self._on_row_selected)
+        self.listbox.set_placeholder(self._empty_placeholder())
         sw = Gtk.ScrolledWindow()
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sw.set_min_content_height(150)
+        sw.set_min_content_height(170)
         sw.add(self.listbox)
         sw.set_shadow_type(Gtk.ShadowType.IN)
         self.pack_start(sw, True, True, 0)
 
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        add_btn = Gtk.Button(label="＋ Add")
+        # A prominent, full-width add button, with the reorder/remove tools below.
+        add_btn = Gtk.Button.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
+        add_btn.set_label("Add module")
+        add_btn.set_always_show_image(True)
+        add_btn.set_tooltip_text(f"Add a module to the {PLACEMENT_LABELS[placement].lower()} section")
         add_btn.connect("clicked", self._on_add)
+        self.pack_start(add_btn, False, False, 0)
+
+        tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         up = Gtk.Button.new_from_icon_name("go-up-symbolic", Gtk.IconSize.BUTTON)
-        up.set_tooltip_text("Move up")
+        up.set_tooltip_text("Move selected module up")
         up.connect("clicked", lambda _b: self._move(-1))
         down = Gtk.Button.new_from_icon_name("go-down-symbolic", Gtk.IconSize.BUTTON)
-        down.set_tooltip_text("Move down")
+        down.set_tooltip_text("Move selected module down")
         down.connect("clicked", lambda _b: self._move(1))
         rm = Gtk.Button.new_from_icon_name("edit-delete-symbolic", Gtk.IconSize.BUTTON)
-        rm.set_tooltip_text("Remove module")
+        rm.set_tooltip_text("Remove selected module")
         rm.connect("clicked", lambda _b: self._remove())
-        toolbar.pack_start(add_btn, False, False, 0)
-        toolbar.pack_end(rm, False, False, 0)
-        toolbar.pack_end(down, False, False, 0)
-        toolbar.pack_end(up, False, False, 0)
-        self.pack_start(toolbar, False, False, 0)
+        tools.pack_start(up, True, True, 0)
+        tools.pack_start(down, True, True, 0)
+        tools.pack_start(rm, True, True, 0)
+        self.pack_start(tools, False, False, 0)
 
     # ── model helpers ─────────────────────────────────────────────────────────
     @property
     def modules(self):
         return self.panel.bar.modules_for(self.placement)
+
+    @staticmethod
+    def _empty_placeholder():
+        lbl = Gtk.Label(xalign=0.5)
+        lbl.set_markup("<span alpha='55%'>Empty\nClick “Add module”</span>")
+        lbl.set_justify(Gtk.Justification.CENTER)
+        lbl.set_margin_top(24)
+        lbl.set_margin_bottom(24)
+        lbl.show()
+        return lbl
+
+    def _update_header(self):
+        n = len(self.modules)
+        count = f"  <span alpha='55%'>({n})</span>" if n else ""
+        self.header.set_markup(f"<b>{PLACEMENT_LABELS[self.placement]}</b>{count}")
 
     def refresh(self, select_index=None):
         for child in self.listbox.get_children():
@@ -66,6 +86,7 @@ class ColumnView(Gtk.Box):
         for inst in self.modules:
             self.listbox.add(self._make_row(inst))
         self.listbox.show_all()
+        self._update_header()
         if select_index is not None and 0 <= select_index < len(self.modules):
             row = self.listbox.get_row_at_index(select_index)
             self.listbox.select_row(row)
@@ -109,7 +130,7 @@ class ColumnView(Gtk.Box):
             return
         self.modules.pop(idx)
         self.refresh()
-        self.panel.clear_settings()
+        self.panel._show_placeholder()
         self.panel.mark_changed()
 
 
@@ -120,6 +141,14 @@ class ModulesPanel(Gtk.Box):
         self.bar = bar
         self._on_changed = on_changed
 
+        intro = Gtk.Label(xalign=0.0)
+        intro.set_markup(
+            "<small><span alpha='70%'>Modules appear on the bar left to right within "
+            "each section. Add modules to Left, Center or Right, reorder them, then select "
+            "one to edit its settings.</span></small>")
+        intro.set_line_wrap(True)
+        self.pack_start(intro, False, False, 0)
+
         columns_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                               homogeneous=True)
         self.columns = {}
@@ -129,22 +158,25 @@ class ModulesPanel(Gtk.Box):
             columns_box.pack_start(col, True, True, 0)
         self.pack_start(columns_box, False, False, 0)
 
-        sep = Gtk.Label(xalign=0.0)
-        sep.set_markup("<b>Module settings</b>")
-        self.pack_start(sep, False, False, 0)
-
-        self._settings_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        placeholder = Gtk.Label(label="Select a module above to edit its settings.",
-                               xalign=0.0)
-        placeholder.set_margin_top(12)
-        placeholder.set_margin_bottom(12)
-        self._settings_container.pack_start(placeholder, False, False, 0)
+        settings_frame, settings_box = widgets.section_frame("Module settings")
+        self._settings_container = settings_box
         settings_sw = Gtk.ScrolledWindow()
         settings_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        settings_sw.add(self._settings_container)
+        settings_sw.add(settings_frame)
         self.pack_start(settings_sw, True, True, 0)
 
         self.refresh_all()
+        self._show_placeholder()
+
+    def _show_placeholder(self):
+        self.clear_settings()
+        placeholder = Gtk.Label(xalign=0.5)
+        placeholder.set_markup(
+            "<span alpha='60%'>Select a module above to edit its settings.</span>")
+        placeholder.set_margin_top(18)
+        placeholder.set_margin_bottom(18)
+        self._settings_container.pack_start(placeholder, True, True, 0)
+        self._settings_container.show_all()
 
     def refresh_all(self):
         for col in self.columns.values():
